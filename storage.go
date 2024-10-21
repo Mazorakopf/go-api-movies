@@ -1,4 +1,4 @@
-package movies
+package main
 
 type Movie struct {
 	ID       string    `json:"id"`
