@@ -8,7 +8,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func SetupMovieRoutes(router *mux.Router) {
+func SetupMovieRoutes(router *mux.Router) *mux.Router {
 	sr := router.PathPrefix("/api/movies").Subrouter()
 
 	sr.HandleFunc("", getMovies).Methods("GET")
@@ -16,6 +16,8 @@ func SetupMovieRoutes(router *mux.Router) {
 	sr.HandleFunc("", createMovie).Methods("POST")
 	sr.HandleFunc("/{id}", updateMovie).Methods("PUT")
 	sr.HandleFunc("/{id}", deleteMovie).Methods("DELETE")
+
+	return sr
 }
 
 func getMovies(w http.ResponseWriter, r *http.Request) {

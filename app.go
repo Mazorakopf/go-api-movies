@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
@@ -14,12 +16,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var SECRET_KEY = []byte("1234")
+
 type App struct {
 	router *mux.Router
 }
 
 func NewApp() *App {
 	r := mux.NewRouter()
+	r.Use(applicationJsonResponseContent)
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Test-Header", "wow")
@@ -29,9 +34,8 @@ func NewApp() *App {
 
 	r.HandleFunc("/api/auth", authenticate)
 
-	SetupMovieRoutes(r)
-
-	r.Use(applicationJsonResponseContent)
+	mr := SetupMovieRoutes(r)
+	mr.Use(vaerifyJwtMiddleware)
 
 	return &App{r}
 }
@@ -45,6 +49,28 @@ func (a *App) Run(port int) {
 func applicationJsonResponseContent(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func vaerifyJwtMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString, errExtractionToken := extractToken(r.Header.Get("Authorization"))
+		if errExtractionToken != nil {
+			log.Println(errExtractionToken)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Authorization header is invalid."})
+			return
+		}
+
+		token, errVerifyingToken := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+			return SECRET_KEY, nil
+		})
+
+		if errVerifyingToken != nil || !token.Valid {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Jwt token is invalid."})
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -79,9 +105,10 @@ func authenticate(w http.ResponseWriter, r *http.Request) {
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"iss":      "movies-service",
 		"username": payload["username"],
+		"exp":      time.Now().Add(5 * time.Minute).Unix(),
 	})
 
-	s, e := t.SignedString([]byte("1234"))
+	s, e := t.SignedString(SECRET_KEY)
 	if e != nil {
 		log.Println("Token cannot be signed:", e)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
@@ -108,4 +135,25 @@ func comparePassword(password string, hashed string) bool {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
+}
+
+func extractToken(authHeader string) (string, error) {
+	const bearerPrefix = "Bearer "
+
+	if authHeader == "" {
+		return "", errors.New("authorization header is empty")
+	}
+
+	if !strings.HasPrefix(authHeader, bearerPrefix) {
+		return "", errors.New("authorization header does not contain Bearer prefix")
+	}
+
+	token := strings.TrimPrefix(authHeader, bearerPrefix)
+	token = strings.TrimSpace(token)
+
+	if token == "" {
+		return "", errors.New("authorization header does not contain token")
+	}
+
+	return token, nil
 }
