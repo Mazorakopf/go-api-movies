@@ -51,64 +51,61 @@ func applicationJsonResponseContent(next http.Handler) http.Handler {
 
 func authenticate(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]string
-	_ = json.NewDecoder(r.Body).Decode(&payload)
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid request payload"})
+		return
+	}
 
-	encoder := json.NewEncoder(w)
-
-	un, okU := payload["username"]
-	p, okP := payload["password"]
-
-	if !okU || !okP {
-		w.WriteHeader(http.StatusBadRequest)
-
-		misingFieslds := []string{}
-		if !okU {
-			misingFieslds = append(misingFieslds, "username")
-		}
-		if !okP {
-			misingFieslds = append(misingFieslds, "password")
-		}
-
-		encoder.Encode(map[string]string{
-			"message": fmt.Sprintf("Missing field(s): %s", strings.Join(misingFieslds, ",")),
+	missingFields := checkMissingFields(payload, "username", "password")
+	if len(missingFields) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"message": fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ",")),
 		})
 		return
 	}
 
 	matched := false
 	for _, user := range users {
-		if user["name"] == un && comparePassword(p, user["password"]) {
+		if user["name"] == payload["username"] && comparePassword(payload["password"], user["password"]) {
 			matched = true
 		}
 	}
 
 	if !matched {
-		w.WriteHeader(http.StatusUnauthorized)
-		encoder.Encode(map[string]string{"message": "Wrong username or password."})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Wrong username or password."})
 		return
 	}
 
-	t := jwt.NewWithClaims(jwt.SigningMethodHS256,
-		jwt.MapClaims{
-			"iss":      "movies-service",
-			"username": un,
-		})
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"iss":      "movies-service",
+		"username": payload["username"],
+	})
 
 	s, e := t.SignedString([]byte("1234"))
-
 	if e != nil {
-		log.Panic("Token can not be signed.")
-		w.WriteHeader(http.StatusInternalServerError)
+		log.Println("Token cannot be signed:", e)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		return
 	}
 
-	encoder.Encode(map[string]interface{}{"token": s})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"token": s})
 }
 
-func comparePassword(password string, original string) bool {
-	hashedPass, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return false
+func checkMissingFields(payload map[string]string, fields ...string) []string {
+	var missing []string
+	for _, field := range fields {
+		if _, ok := payload[field]; !ok {
+			missing = append(missing, field)
+		}
 	}
+	return missing
+}
 
-	return bcrypt.CompareHashAndPassword(hashedPass, []byte(original)) == nil
+func comparePassword(password string, hashed string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)) == nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
 }

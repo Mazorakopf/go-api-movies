@@ -18,5 +18,5 @@ var movies = []Movie{
 }
 
 var users = []map[string]string{
-	{"name": "admin", "password": "admin"},
+	{"name": "admin", "password": "$2a$10$miwrWXNyiF7Qiv6ir9YTueSulDDrJfjj1w2r1dLpAmaOj/TglYyKG"},
 }
