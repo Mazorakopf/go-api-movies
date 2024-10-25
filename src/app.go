@@ -18,13 +18,17 @@ import (
 
 var SECRET_KEY = []byte("1234")
 
+var users = []map[string]string{
+	{"name": "admin", "password": "$2a$10$miwrWXNyiF7Qiv6ir9YTueSulDDrJfjj1w2r1dLpAmaOj/TglYyKG"},
+}
+
 type App struct {
 	router *mux.Router
 }
 
-func NewApp() *App {
+func NewApp(storage *Storage) *App {
 	r := mux.NewRouter()
-	r.Use(applicationJsonResponseContent)
+	r.Use(applicationJsonContentTypeHeaderMiddleware)
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Test-Header", "wow")
@@ -34,8 +38,8 @@ func NewApp() *App {
 
 	r.HandleFunc("/api/auth", authenticate)
 
-	mr := SetupMovieRoutes(r)
-	mr.Use(vaerifyJwtMiddleware)
+	mr := SetupMovieRoutes(r, storage)
+	mr.Use(verifyAuthorizationHeaderMiddleware)
 
 	return &App{r}
 }
@@ -46,28 +50,29 @@ func (a *App) Run(port int) {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), r))
 }
 
-func applicationJsonResponseContent(next http.Handler) http.Handler {
+func applicationJsonContentTypeHeaderMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
 }
 
-func vaerifyJwtMiddleware(next http.Handler) http.Handler {
+func verifyAuthorizationHeaderMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokenString, errExtractionToken := extractToken(r.Header.Get("Authorization"))
-		if errExtractionToken != nil {
-			log.Println(errExtractionToken)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Authorization header is invalid."})
+		tokenString, err := extractToken(r.Header.Get("Authorization"))
+		if err != nil {
+			log.Println("[DEBUG] Failed to extract token from Authorization header.", err)
+			writeJSON(w, http.StatusBadRequest, errorResponse(err.Error()))
 			return
 		}
 
-		token, errVerifyingToken := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 			return SECRET_KEY, nil
 		})
 
-		if errVerifyingToken != nil || !token.Valid {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Jwt token is invalid."})
+		if err != nil || !token.Valid {
+			log.Println("[DEBUG] Jwt token cannot be verified.", err)
+			writeJSON(w, http.StatusUnauthorized, errorResponse("Jwt token is invalid."))
 			return
 		}
 
@@ -78,63 +83,42 @@ func vaerifyJwtMiddleware(next http.Handler) http.Handler {
 func authenticate(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid request payload"})
+		writeJSON(w, http.StatusBadRequest, errorResponse("Invalid request payload"))
 		return
 	}
 
 	missingFields := checkMissingFields(payload, "username", "password")
 	if len(missingFields) > 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"message": fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ",")),
-		})
+		writeJSON(w, http.StatusBadRequest, errorResponse(fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ","))))
 		return
 	}
 
 	matched := false
 	for _, user := range users {
-		if user["name"] == payload["username"] && comparePassword(payload["password"], user["password"]) {
-			matched = true
+		if user["name"] == payload["username"] {
+			matched = bcrypt.CompareHashAndPassword([]byte(payload["password"]), []byte(user["password"])) == nil
 		}
 	}
 
 	if !matched {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Wrong username or password."})
+		writeJSON(w, http.StatusUnauthorized, errorResponse("Wrong username or password."))
 		return
 	}
 
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"iss":      "movies-service",
 		"username": payload["username"],
-		"exp":      time.Now().Add(5 * time.Minute).Unix(),
+		"exp":      time.Now().Add(30 * time.Minute).Unix(),
 	})
 
-	s, e := t.SignedString(SECRET_KEY)
-	if e != nil {
-		log.Println("Token cannot be signed:", e)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+	s, err := t.SignedString(SECRET_KEY)
+	if err != nil {
+		log.Println("Token cannot be signed.", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error"))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"token": s})
-}
-
-func checkMissingFields(payload map[string]string, fields ...string) []string {
-	var missing []string
-	for _, field := range fields {
-		if _, ok := payload[field]; !ok {
-			missing = append(missing, field)
-		}
-	}
-	return missing
-}
-
-func comparePassword(password string, hashed string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)) == nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	writeJSON(w, http.StatusOK, map[string]string{"token": s})
 }
 
 func extractToken(authHeader string) (string, error) {

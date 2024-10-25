@@ -1,89 +1,123 @@
 package main
 
 import (
-	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
 
-func SetupMovieRoutes(router *mux.Router) *mux.Router {
+func SetupMovieRoutes(router *mux.Router, storage *Storage) *mux.Router {
 	sr := router.PathPrefix("/api/movies").Subrouter()
 
-	sr.HandleFunc("", getMovies).Methods("GET")
-	sr.HandleFunc("/{id}", getMovie).Methods("GET")
-	// sr.HandleFunc("", createMovie).Methods("POST")
-	// sr.HandleFunc("/{id}", updateMovie).Methods("PUT")
-	// sr.HandleFunc("/{id}", deleteMovie).Methods("DELETE")
+	sr.HandleFunc("", getMovies(storage)).Methods("GET")
+	sr.HandleFunc("/{id}", getMovieById(storage)).Methods("GET")
+	sr.HandleFunc("", createMovie(storage)).Methods("POST")
+	sr.HandleFunc("/{id}", deleteMovie(storage)).Methods("DELETE")
 
 	return sr
 }
 
-func getMovies(w http.ResponseWriter, r *http.Request) {
-	movies, err := findAllMovies()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error."})
-		return
+func getMovies(storage *Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		movies, err := storage.findAllMovies()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
+			return
+		}
+		writeJSON(w, http.StatusOK, movies)
 	}
-	writeJSON(w, http.StatusOK, movies)
 }
 
-// func deleteMovie(w http.ResponseWriter, r *http.Request) {
-// 	params := mux.Vars(r)
-// 	for idx, item := range movies {
-// 		if item.ID == params["id"] {
-// 			movies = append(movies[:idx], movies[idx+1:]...)
-// 			w.WriteHeader(http.StatusNoContent)
-// 			return
-// 		}
-// 	}
-// 	writeMessageNotFoundResponse(w)
-// }
+func deleteMovie(storage *Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		missingFields := checkMissingFields(params, "id")
+		if len(missingFields) > 0 {
+			writeJSON(w, http.StatusBadRequest, errorResponse(fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ","))))
+			return
+		}
+		id, err := strconv.Atoi(params["id"])
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse("id is not anumber"))
+			return
+		}
 
-func getMovie(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
+		removed, err := storage.removeMovieById(id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal Server Error"))
+			return
+		}
 
-	id, err := strconv.Atoi(params["id"])
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"message": "Invalid movie id"})
+		if !removed {
+			writeJSON(w, http.StatusNotFound, errorResponse("Not Found"))
+			return
+		}
+
+		writeJSON(w, http.StatusNoContent, nil)
 	}
-
-	movie, err := findMovieById(id)
-	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{"message": "Not Found"})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error."})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, movie)
 }
 
-// func createMovie(w http.ResponseWriter, r *http.Request) {
-// 	var movie Movie
-// 	_ = json.NewDecoder(r.Body).Decode(&movie)
-// 	movie.ID = uuid.New().String()
-// 	movies = append(movies, movie)
-// 	json.NewEncoder(w).Encode(movie)
-// 	w.WriteHeader(http.StatusCreated)
-// }
+func getMovieById(storage *Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
 
-// func updateMovie(w http.ResponseWriter, r *http.Request) {
-// 	params := mux.Vars(r)
+		missingFields := checkMissingFields(params, "id")
+		if len(missingFields) > 0 {
+			writeJSON(w, http.StatusBadRequest, errorResponse(fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ","))))
+			return
+		}
 
-// 	for idx, item := range movies {
-// 		if item.ID == params["id"] {
-// 			movies = append(movies[:idx], movies[idx+1:]...)
-// 			var movie Movie
-// 			_ = json.NewDecoder(r.Body).Decode(&movie)
-// 			movie.ID = params["id"]
-// 			movies = append(movies, movie)
-// 			json.NewEncoder(w).Encode(movie)
-// 			return
-// 		}
-// 	}
-// 	writeMessageNotFoundResponse(w)
-// }
+		id, err := strconv.Atoi(params["id"])
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse("Invalid movie id"))
+			return
+		}
+
+		movie, err := storage.findMovieById(id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error."})
+			return
+		}
+		if movie == nil {
+			writeJSON(w, http.StatusNotFound, errorResponse(fmt.Sprintf("Movie is not found by id - '%d'", movie.ID)))
+			return
+		}
+
+		writeJSON(w, http.StatusOK, movie)
+	}
+}
+
+func createMovie(storage *Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var movie Movie
+		err := json.NewDecoder(r.Body).Decode(&movie)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse("Malformed request body."))
+			return
+		}
+
+		director, err := storage.findDirectorById(movie.Director.ID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
+			return
+		}
+
+		if director == nil {
+			log.Printf("[INFO] Use existing director by id - '%d' when creating movie.\n", movie.Director.ID)
+		}
+
+		id, err := storage.insertMovie(movie, director)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
+			return
+		}
+
+		w.Header().Set("Resource-Id", strconv.FormatInt(id, 10))
+		writeJSON(w, http.StatusCreated, nil)
+	}
+}

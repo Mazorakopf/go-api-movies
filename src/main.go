@@ -1,6 +1,16 @@
 package main
 
 func main() {
-	connectDB()
-	NewApp().Run(8000)
+	NewApp(
+		&Storage{
+			ConnectionInfo: ConnectionInfo{
+				driver:   "postgres",
+				username: "root",
+				password: "secret",
+				host:     "localhost",
+				port:     5432,
+				database: "movies",
+			},
+		},
+	).Run(8000)
 }
