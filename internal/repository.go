@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"database/sql"
@@ -9,14 +9,14 @@ import (
 )
 
 // [START] Database Entities
-type Movie struct {
+type movie struct {
 	ID       int      `json:"id"`
 	Isbn     string   `json:"isbn"`
 	Title    string   `json:"title"`
-	Director Director `json:"director"`
+	Director director `json:"director"`
 }
 
-type Director struct {
+type director struct {
 	ID        int    `json:"id"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
@@ -24,33 +24,22 @@ type Director struct {
 
 // [END] Database Entities
 
-type ConnectionInfo struct {
-	driver   string
-	username string
-	password string
-	host     string
-	port     int
-	database string
+type connection struct {
+	DB *sql.DB
 }
 
-type Storage struct {
-	DB             *sql.DB
-	ConnectionInfo ConnectionInfo
-}
-
-func (s *Storage) Connect() *Storage {
-	ci := s.ConnectionInfo
-	soueceUrl := fmt.Sprintf("%s://%s:%s@%s:%d/%s?sslmode=disable", ci.driver, ci.username, ci.password, ci.host, ci.port, ci.database)
-	db, err := sql.Open(ci.driver, soueceUrl)
+func NewDbConnection(driver, username, password, host, port, database string) *connection {
+	soueceUrl := fmt.Sprintf("%s://%s:%s@%s:%s/%s?sslmode=disable", driver, username, password, host, port, database)
+	db, err := sql.Open(driver, soueceUrl)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	return &Storage{DB: db}
+	return &connection{DB: db}
 }
 
-func (s *Storage) findAllMovies() ([]Movie, error) {
-	rows, err := s.DB.Query("SELECT m.id, m.isbn, m.title, d.id, d.first_name, d.last_name FROM movies m INNER JOIN directors d ON d.id = m.director_id")
+func (c *connection) findAllMovies() ([]movie, error) {
+	rows, err := c.DB.Query("SELECT m.id, m.isbn, m.title, d.id, d.first_name, d.last_name FROM movies m INNER JOIN directors d ON d.id = m.director_id")
 	if err != nil {
 		log.Printf("[ERROR] Failed to execute 'SELECT all movies' query: %v", err)
 		return nil, fmt.Errorf("query execution failed: %w", err)
@@ -58,10 +47,12 @@ func (s *Storage) findAllMovies() ([]Movie, error) {
 
 	defer rows.Close()
 
-	var movies []Movie
+	var movies []movie
 	for rows.Next() {
-		var movie Movie
-		var director Director
+		var (
+			movie    movie
+			director director
+		)
 
 		if err := rows.Scan(&movie.ID, &movie.Isbn, &movie.Title, &director.ID, &director.FirstName, &director.LastName); err != nil {
 			log.Println("[ERROR] Scan movies from select all statement is failed.", err)
@@ -74,11 +65,13 @@ func (s *Storage) findAllMovies() ([]Movie, error) {
 	return movies, nil
 }
 
-func (s *Storage) findMovieById(id int) (*Movie, error) {
-	row := s.DB.QueryRow("SELECT m.id, m.isbn, m.title, d.id, d.first_name, d.last_name FROM movies m INNER JOIN directors d ON d.id = m.director_id WHERE m.id = $1", id)
+func (c *connection) findMovieById(id int) (*movie, error) {
+	row := c.DB.QueryRow("SELECT m.id, m.isbn, m.title, d.id, d.first_name, d.last_name FROM movies m INNER JOIN directors d ON d.id = m.director_id WHERE m.id = $1", id)
 
-	var movie Movie
-	var director Director
+	var (
+		movie    movie
+		director director
+	)
 
 	if err := row.Scan(&movie.ID, &movie.Isbn, &movie.Title, &director.ID, &director.FirstName, &director.LastName); err != nil {
 		if err == sql.ErrNoRows {
@@ -94,8 +87,8 @@ func (s *Storage) findMovieById(id int) (*Movie, error) {
 	return &movie, nil
 }
 
-func (s *Storage) removeMovieById(id int) (bool, error) {
-	result, err := s.DB.Exec("DELETE FROM movies WHERE id = $1", id)
+func (c *connection) removeMovieById(id int) (bool, error) {
+	result, err := c.DB.Exec("DELETE FROM movies WHERE id = $1", id)
 	if err != nil {
 		log.Printf("[ERROR] Failed to execute delete statement for movie with id '%d': %v", id, err)
 		return false, fmt.Errorf("delete statement execution failed: %w", err)
@@ -110,8 +103,8 @@ func (s *Storage) removeMovieById(id int) (bool, error) {
 	return affected >= 1, nil
 }
 
-func (s *Storage) insertMovie(movie Movie, director *Director) (int64, error) {
-	trx, err := s.DB.Begin()
+func (c *connection) insertMovie(movie movie, director *director) (int64, error) {
+	trx, err := c.DB.Begin()
 	if err != nil {
 		log.Printf("[ERROR] Failed to begin transaction for movie with id - '%d'. %v", movie.ID, err)
 		return -1, fmt.Errorf("transaction begin failed: %w", err)
@@ -125,7 +118,7 @@ func (s *Storage) insertMovie(movie Movie, director *Director) (int64, error) {
 
 	var directorId int64
 	if director == nil {
-		err = s.DB.QueryRow("INSERT INTO directors (first_name, last_name) VALUES ($1, $2) RETURNING id", movie.Director.FirstName, movie.Director.LastName).Scan(&directorId)
+		err = c.DB.QueryRow("INSERT INTO directors (first_name, last_name) VALUES ($1, $2) RETURNING id", movie.Director.FirstName, movie.Director.LastName).Scan(&directorId)
 		if err != nil {
 			log.Printf("[ERROR] Failed to insert director for movie with id - '%d': %v", movie.ID, err)
 			return -1, fmt.Errorf("insert director failed: %w", err)
@@ -135,7 +128,7 @@ func (s *Storage) insertMovie(movie Movie, director *Director) (int64, error) {
 	}
 
 	var movieId int64
-	err = s.DB.QueryRow("INSERT INTO movies (isbn, title, director_id) VALUES ($1, $2, $3) RETURNING id", movie.Isbn, movie.Title, directorId).Scan(&movieId)
+	err = c.DB.QueryRow("INSERT INTO movies (isbn, title, director_id) VALUES ($1, $2, $3) RETURNING id", movie.Isbn, movie.Title, directorId).Scan(&movieId)
 	if err != nil {
 		log.Printf("[ERROR] Failed to insert movie with title '%s': %v", movie.Title, err)
 		return -1, fmt.Errorf("insert movie failed: %w", err)
@@ -149,10 +142,10 @@ func (s *Storage) insertMovie(movie Movie, director *Director) (int64, error) {
 	return movieId, nil
 }
 
-func (s *Storage) findDirectorById(id int) (*Director, error) {
-	row := s.DB.QueryRow("SELECT * FROM directors d WHERE d.id = $1", id)
+func (c *connection) findDirectorById(id int) (*director, error) {
+	row := c.DB.QueryRow("SELECT * FROM directors d WHERE d.id = $1", id)
 
-	var director Director
+	var director director
 	err := row.Scan(&director.ID, &director.FirstName, &director.LastName)
 	if err != nil {
 		if err == sql.ErrNoRows {
