@@ -14,7 +14,9 @@ type app struct {
 	router *mux.Router
 }
 
-func New(connection *connection) *app {
+func New(cInfo *ConnectionInfo) *app {
+	connection := newDbConnection(cInfo)
+
 	r := mux.NewRouter()
 	r.Use(applicationJsonContentTypeHeaderMiddleware)
 

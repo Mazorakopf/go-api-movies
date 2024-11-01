@@ -5,6 +5,12 @@ import (
 )
 
 func main() {
-	dbConnection := app.NewDbConnection("postgres", "root", "secret", "localhost", "5432", "movies")
-	app.New(dbConnection).Run(8000)
+	app.New(
+		&app.ConnectionInfo{
+			Username: "root",
+			Password: "secret",
+			Host:     "localhost",
+			Port:     5432,
+		},
+	).Run(8000)
 }
