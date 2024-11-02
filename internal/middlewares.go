@@ -9,7 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func applicationJsonContentTypeHeaderMiddleware(next http.Handler) http.Handler {
+func applicationJSONContentTypeHeaderMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
@@ -26,7 +26,7 @@ func verifyAuthorizationHeaderMiddleware(next http.Handler) http.Handler {
 		}
 
 		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			return SECRET_KEY, nil
+			return secretKey, nil
 		})
 
 		if err != nil || !token.Valid {

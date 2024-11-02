@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var SECRET_KEY = []byte("1234")
+var secretKey = []byte("1234")
 
 var users = []map[string]string{
 	{"name": "admin", "password": "$2a$10$miwrWXNyiF7Qiv6ir9YTueSulDDrJfjj1w2r1dLpAmaOj/TglYyKG"},
@@ -52,7 +52,7 @@ func authenticate() http.HandlerFunc {
 			"exp":      time.Now().Add(30 * time.Minute).Unix(),
 		})
 
-		s, err := t.SignedString(SECRET_KEY)
+		s, err := t.SignedString(secretKey)
 		if err != nil {
 			log.Println("Token cannot be signed.", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error"))
@@ -88,7 +88,7 @@ func deleteMovie(connection *connection) http.HandlerFunc {
 			return
 		}
 
-		removed, err := connection.removeMovieById(id)
+		removed, err := connection.removeMovieByID(id)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal Server Error"))
 			return
@@ -103,7 +103,7 @@ func deleteMovie(connection *connection) http.HandlerFunc {
 	}
 }
 
-func getMovieById(connection *connection) http.HandlerFunc {
+func getMovieByID(connection *connection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 
@@ -119,7 +119,7 @@ func getMovieById(connection *connection) http.HandlerFunc {
 			return
 		}
 
-		movie, err := connection.findMovieById(id)
+		movie, err := connection.findMovieByID(id)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error."})
 			return
@@ -142,7 +142,7 @@ func createMovie(connection *connection) http.HandlerFunc {
 			return
 		}
 
-		director, err := connection.findDirectorById(movie.Director.ID)
+		director, err := connection.findDirectorByID(movie.Director.ID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
 			return

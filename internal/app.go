@@ -15,10 +15,10 @@ type app struct {
 }
 
 func New(cInfo *ConnectionInfo) *app {
-	connection := newDbConnection(cInfo)
+	connection := newDBConnection(cInfo)
 
 	r := mux.NewRouter()
-	r.Use(applicationJsonContentTypeHeaderMiddleware)
+	r.Use(applicationJSONContentTypeHeaderMiddleware)
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Test-Header", "wow")
@@ -32,7 +32,7 @@ func New(cInfo *ConnectionInfo) *app {
 	mr.Use(verifyAuthorizationHeaderMiddleware)
 
 	mr.HandleFunc("", getMovies(connection)).Methods(http.MethodGet)
-	mr.HandleFunc("/{id}", getMovieById(connection)).Methods(http.MethodGet)
+	mr.HandleFunc("/{id}", getMovieByID(connection)).Methods(http.MethodGet)
 	mr.HandleFunc("", createMovie(connection)).Methods(http.MethodPost)
 	mr.HandleFunc("/{id}", deleteMovie(connection)).Methods(http.MethodDelete)
 
