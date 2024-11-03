@@ -21,7 +21,7 @@ func verifyAuthorizationHeaderMiddleware(next http.Handler) http.Handler {
 		tokenString, err := extractToken(r.Header.Get("Authorization"))
 		if err != nil {
 			log.Println("[DEBUG] Failed to extract token from Authorization header.", err)
-			writeJSON(w, http.StatusBadRequest, errorResponse(err.Error()))
+			respondWithError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -31,7 +31,7 @@ func verifyAuthorizationHeaderMiddleware(next http.Handler) http.Handler {
 
 		if err != nil || !token.Valid {
 			log.Println("[DEBUG] Jwt token cannot be verified.", err)
-			writeJSON(w, http.StatusUnauthorized, errorResponse("Jwt token is invalid."))
+			respondWithError(w, http.StatusUnauthorized, "Jwt token is invalid.")
 			return
 		}
 

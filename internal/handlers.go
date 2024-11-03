@@ -24,13 +24,13 @@ func authenticate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse("Invalid request payload"))
+			respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 			return
 		}
 
 		missingFields := checkMissingFields(payload, "username", "password")
 		if len(missingFields) > 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse(fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ","))))
+			respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ",")))
 			return
 		}
 
@@ -42,7 +42,7 @@ func authenticate() http.HandlerFunc {
 		}
 
 		if !matched {
-			writeJSON(w, http.StatusUnauthorized, errorResponse("Wrong username or password."))
+			respondWithError(w, http.StatusUnauthorized, "Wrong username or password.")
 			return
 		}
 
@@ -55,11 +55,11 @@ func authenticate() http.HandlerFunc {
 		s, err := t.SignedString(secretKey)
 		if err != nil {
 			log.Println("Token cannot be signed.", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error"))
+			respondWithError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{"token": s})
+		respondWithJSON(w, http.StatusOK, map[string]string{"token": s})
 	}
 }
 
@@ -67,10 +67,10 @@ func getMovies(connection *connection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		movies, err := connection.findAllMovies()
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
+			respondWithError(w, http.StatusInternalServerError, "Internal server error.")
 			return
 		}
-		writeJSON(w, http.StatusOK, movies)
+		respondWithJSON(w, http.StatusOK, movies)
 	}
 }
 
@@ -79,27 +79,27 @@ func deleteMovie(connection *connection) http.HandlerFunc {
 		params := mux.Vars(r)
 		missingFields := checkMissingFields(params, "id")
 		if len(missingFields) > 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse(fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ","))))
+			respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ",")))
 			return
 		}
 		id, err := strconv.Atoi(params["id"])
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse("id is not anumber"))
+			respondWithError(w, http.StatusBadRequest, "id is not anumber")
 			return
 		}
 
 		removed, err := connection.removeMovieByID(id)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal Server Error"))
+			respondWithError(w, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
 
 		if !removed {
-			writeJSON(w, http.StatusNotFound, errorResponse("Not Found"))
+			respondWithError(w, http.StatusNotFound, "Not Found")
 			return
 		}
 
-		writeJSON(w, http.StatusNoContent, nil)
+		respondWithJSON(w, http.StatusNoContent, nil)
 	}
 }
 
@@ -109,27 +109,27 @@ func getMovieByID(connection *connection) http.HandlerFunc {
 
 		missingFields := checkMissingFields(params, "id")
 		if len(missingFields) > 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse(fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ","))))
+			respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Missing field(s): %s", strings.Join(missingFields, ",")))
 			return
 		}
 
 		id, err := strconv.Atoi(params["id"])
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse("Invalid movie id"))
+			respondWithError(w, http.StatusBadRequest, "Invalid movie id")
 			return
 		}
 
 		movie, err := connection.findMovieByID(id)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal server error."})
+			respondWithError(w, http.StatusInternalServerError, "Internal server error.")
 			return
 		}
 		if movie == nil {
-			writeJSON(w, http.StatusNotFound, errorResponse(fmt.Sprintf("Movie is not found by id - '%d'", id)))
+			respondWithError(w, http.StatusNotFound, fmt.Sprintf("Movie is not found by id - '%d'", id))
 			return
 		}
 
-		writeJSON(w, http.StatusOK, movie)
+		respondWithJSON(w, http.StatusOK, movie)
 	}
 }
 
@@ -138,13 +138,13 @@ func createMovie(connection *connection) http.HandlerFunc {
 		var movie movie
 		err := json.NewDecoder(r.Body).Decode(&movie)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse("Malformed request body."))
+			respondWithError(w, http.StatusBadRequest, "Malformed request body.")
 			return
 		}
 
 		director, err := connection.findDirectorByID(movie.Director.ID)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
+			respondWithError(w, http.StatusInternalServerError, "Internal server error.")
 			return
 		}
 
@@ -154,11 +154,11 @@ func createMovie(connection *connection) http.HandlerFunc {
 
 		id, err := connection.insertMovie(movie, director)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse("Internal server error."))
+			respondWithError(w, http.StatusInternalServerError, "Internal server error.")
 			return
 		}
 
 		w.Header().Set("Resource-Id", strconv.FormatInt(id, 10))
-		writeJSON(w, http.StatusCreated, nil)
+		respondWithJSON(w, http.StatusCreated, nil)
 	}
 }

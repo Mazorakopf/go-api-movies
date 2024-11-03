@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -15,13 +16,26 @@ func checkMissingFields(payload map[string]string, fields ...string) []string {
 	return missing
 }
 
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+func respondWithJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
-	if data != nil {
-		json.NewEncoder(w).Encode(data)
+
+	if data == nil {
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("[ERROR] Failed to encode body into resposne: %v", err)
 	}
 }
 
-func errorResponse(message string) map[string]string {
-	return map[string]string{"message": message}
+func respondWithError(w http.ResponseWriter, status int, message string) {
+	w.WriteHeader(status)
+
+	type errorrResponse struct {
+		Message string `json:"message"`
+	}
+
+	if err := json.NewEncoder(w).Encode(errorrResponse{message}); err != nil {
+		log.Printf("[ERROR] Failed to encode error message into resposne: %v", err)
+	}
 }
